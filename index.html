@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="2048 6×6">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#edf0ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171a15" media="(prefers-color-scheme: dark)">
+<title>2048 на 6×6</title>
+<style>
+/* layout: one narrow column — stats, square board sized to the screen, two buttons. System fonts only, so it works offline. */
+:root{
+  --bg:#edf0ea; --fg:#23281f; --muted:#666e60; --board:#c4c9bc; --cell:#d8dcd1;
+  --t1:#fbfaf4; --t1fg:#3a3f33; --t2:#efe7cc; --t2fg:#3a3f33;
+  --accent:#2d6a4f; --btn:#ffffff; --btnfg:#23281f; --line:#c9cec1; --veil:rgba(237,240,234,.86);
+  --font: ui-rounded,"SF Pro Rounded",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#171a15; --fg:#e6e9e1; --muted:#9aa192; --board:#2c3128; --cell:#3a4035;
+  --t1:#565d4f; --t1fg:#eef1e8; --t2:#6b6447; --t2fg:#f4efdd;
+  --accent:#7fc4a0; --btn:#262b22; --btnfg:#e6e9e1; --line:#3a4035; --veil:rgba(23,26,21,.86); color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#171a15; --fg:#e6e9e1; --muted:#9aa192; --board:#2c3128; --cell:#3a4035;
+  --t1:#565d4f; --t1fg:#eef1e8; --t2:#6b6447; --t2fg:#f4efdd;
+  --accent:#7fc4a0; --btn:#262b22; --btnfg:#e6e9e1; --line:#3a4035; --veil:rgba(23,26,21,.86); color-scheme:dark }
+
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);box-sizing:border-box;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:14px;overscroll-behavior:none;-webkit-user-select:none;user-select:none}
+.app{max-width:540px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{margin:0;font-size:2.4rem;line-height:1;font-weight:800;letter-spacing:-.02em}
+h1 small{display:block;font-size:.8rem;font-weight:600;color:var(--muted);letter-spacing:.04em;margin-top:4px}
+.stats{display:flex;gap:6px}
+.stat{background:var(--board);border-radius:8px;padding:6px 10px;min-width:56px;text-align:center}
+.stat b{display:block;font-size:.68rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.stat span{font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums}
+.bar{display:flex;gap:8px}
+button{font:inherit;font-weight:700;font-size:.95rem;border:1px solid var(--line);background:var(--btn);color:var(--btnfg);
+  border-radius:8px;padding:10px 14px;cursor:pointer;flex:1;touch-action:manipulation}
+button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:disabled{opacity:.45;cursor:default}
+button.warn{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+
+.board{position:relative;width:min(100%, calc(100dvh - 210px));max-width:100%;aspect-ratio:1;margin:0 auto;
+  background:var(--board);border-radius:10px;container-type:inline-size;touch-action:none}
+.cell,.tile{position:absolute;width:14.8%;height:14.8%;border-radius:1.6cqw}
+.cell{background:var(--cell)}
+.tile{display:grid;place-items:center;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;
+  transition:left .1s ease-out, top .1s ease-out;z-index:2}
+.tile.gone{z-index:1}
+.tile sup{font-size:.62em;margin-left:.05em}
+.tile.new{animation:appear .14s ease-out}
+.tile.pop{animation:pop .16s ease-out}
+.tile.beyond{box-shadow:inset 0 0 0 .5cqw rgba(255,255,255,.35)}
+@keyframes appear{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes pop{0%{transform:scale(1)}45%{transform:scale(1.13)}100%{transform:scale(1)}}
+
+.over{position:absolute;inset:0;z-index:5;background:var(--veil);border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:12px;text-align:center;padding:16px}
+.over p{margin:0;font-size:1.6rem;font-weight:800}
+.over .bar{width:min(320px,100%)}
+.help{margin:0;color:var(--muted);font-size:.82rem;text-align:center;line-height:1.4}
+@media (prefers-reduced-motion: reduce){ .tile{transition:none} .tile.new,.tile.pop{animation:none} }
+/* the page is the whole app in standalone mode, so it pads the system bars itself */
+body{padding-top:max(14px,env(safe-area-inset-top,0px));padding-bottom:max(14px,env(safe-area-inset-bottom,0px))}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <div class="top">
+    <h1>2048<small>6×6 · без потолка</small></h1>
+    <div class="stats">
+      <div class="stat"><b>Счёт</b><span id="score">0</span></div>
+      <div class="stat"><b>Рекорд</b><span id="best">0</span></div>
+      <div class="stat"><b>Макс.</b><span id="max">2</span></div>
+    </div>
+  </div>
+  <div class="board" id="board">
+    <div class="over" id="over" hidden>
+      <p>Ходов нет</p>
+      <div class="bar"><button id="overUndo" type="button">Отменить ход</button><button id="overNew" type="button" class="warn">Новая игра</button></div>
+    </div>
+  </div>
+  <div class="bar">
+    <button id="undo" type="button">Отменить ход</button>
+    <button id="newg" type="button">Новая игра</button>
+  </div>
+  <p class="help">Свайп по полю или стрелки / WASD. Отмена: U или Z. Прогресс сохраняется в браузере.</p>
+</div>
+
+<script>
+(() => {
+const N = 6, G = 1.6, C = (100 - (N + 1) * G) / N;
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MOVE_MS = reduce ? 0 : 100;
+const KEY = 'g2048-6x6-v1';
+const board = document.getElementById('board');
+const $ = id => document.getElementById(id);
+
+let grid, score = 0, best = 0, history = [], over = false, pending = null;
+
+for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+  const d = document.createElement('div'); d.className = 'cell'; place(d, r, c); board.appendChild(d);
+}
+
+function place(el, r, c){ el.style.left = (G + c * (C + G)) + '%'; el.style.top = (G + r * (C + G)) + '%'; }
+
+// Exponents are stored instead of values so the board never hits a numeric ceiling.
+function label(k){
+  if (k <= 33) return String(2 ** k);
+  return '2<sup>' + k + '</sup>';
+}
+function fontFor(text, k){
+  if (k > 33) return 4.4;
+  const n = text.length;
+  return [0, 7, 7, 6, 5, 4.2, 3.6, 3.1, 2.7, 2.4, 2.2][n] || 2.2;
+}
+const ramp = {3:[32,85,62],4:[18,80,58],5:[4,70,55],6:[345,60,50],7:[46,85,55],8:[140,42,42],9:[172,52,36],10:[204,58,44],11:[232,52,50]};
+function colors(k){
+  if (k === 1) return ['var(--t1)','var(--t1fg)'];
+  if (k === 2) return ['var(--t2)','var(--t2fg)'];
+  let h, s, l;
+  if (ramp[k]) [h, s, l] = ramp[k];
+  else { h = (268 + (k - 12) * 41) % 360; s = 52; l = 40 - ((k - 12) % 3) * 4; }
+  const fg = (l >= 58 || k === 7) ? '#2a1d10' : '#ffffff';
+  return [`hsl(${h} ${s}% ${l}%)`, fg];
+}
+function paint(t){
+  const txt = label(t.k);
+  t.el.innerHTML = txt;
+  const [bg, fg] = colors(t.k);
+  t.el.style.background = bg; t.el.style.color = fg;
+  t.el.style.fontSize = fontFor(txt, t.k) + 'cqw';
+  t.el.classList.toggle('beyond', t.k >= 12);
+}
+function animate(el, cls){ if (reduce) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+
+function makeTile(r, c, k, anim){
+  const el = document.createElement('div'); el.className = 'tile';
+  const t = { r, c, k, el, m: false };
+  place(el, r, c); paint(t); board.appendChild(el);
+  if (anim) animate(el, 'new');
+  grid[r][c] = t; return t;
+}
+
+function empties(){ const e = []; for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!grid[r][c]) e.push([r, c]); return e; }
+function spawn(){
+  const e = empties(); if (!e.length) return;
+  const [r, c] = e[Math.floor(Math.random() * e.length)];
+  makeTile(r, c, Math.random() < 0.9 ? 1 : 2, true);
+}
+function canMove(){
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const t = grid[r][c]; if (!t) return true;
+    if (c + 1 < N && grid[r][c + 1] && grid[r][c + 1].k === t.k) return true;
+    if (r + 1 < N && grid[r + 1][c] && grid[r + 1][c].k === t.k) return true;
+  }
+  return false;
+}
+function snapshot(){ return { cells: grid.map(row => row.map(t => t ? t.k : 0)), score }; }
+function clearTiles(){ board.querySelectorAll('.tile').forEach(e => e.remove()); }
+function load(snap){
+  clearTiles();
+  grid = Array.from({ length: N }, () => Array(N).fill(null));
+  snap.cells.forEach((row, r) => row.forEach((k, c) => { if (k) makeTile(r, c, k, false); }));
+  score = snap.score;
+}
+function maxK(){ let m = 0; for (const row of grid) for (const t of row) if (t && t.k > m) m = t.k; return m; }
+
+function updateStats(){
+  if (score > best) best = score;
+  $('score').textContent = score; $('best').textContent = best;
+  const m = maxK(); $('max').innerHTML = m ? label(m) : '—';
+  $('undo').disabled = history.length === 0;
+  $('over').hidden = !over;
+}
+function save(){
+  try { localStorage.setItem(KEY, JSON.stringify({ cur: snapshot(), best, history: history.slice(-30) })); } catch (e) {}
+}
+
+function newGame(){
+  flush();
+  grid = Array.from({ length: N }, () => Array(N).fill(null));
+  clearTiles(); score = 0; history = []; over = false;
+  spawn(); spawn(); updateStats(); save();
+}
+
+// A move in progress finishes instantly when the next input arrives, so fast swipes are never dropped.
+function flush(){ if (pending){ clearTimeout(pending.timer); const f = pending.fn; pending = null; f(); } }
+
+function move(dir){
+  flush();
+  if (over) return;
+  const [dr, dc] = [[-1,0],[0,1],[1,0],[0,-1]][dir];
+  const rows = [...Array(N).keys()], cols = [...Array(N).keys()];
+  if (dr === 1) rows.reverse(); if (dc === 1) cols.reverse();
+  const snap = snapshot();
+  for (const row of grid) for (const t of row) if (t) t.m = false;
+  let moved = false, gained = 0; const gone = [], merged = [];
+
+  for (const r of rows) for (const c of cols) {
+    const t = grid[r][c]; if (!t) continue;
+    let nr = r, nc = c, absorbed = false;
+    for (;;) {
+      const rr = nr + dr, cc = nc + dc;
+      if (rr < 0 || rr >= N || cc < 0 || cc >= N) break;
+      const o = grid[rr][cc];
+      if (!o) { nr = rr; nc = cc; continue; }
+      if (o.k === t.k && !o.m) {
+        grid[r][c] = null; o.k++; o.m = true; gained += 2 ** o.k;
+        t.r = rr; t.c = cc; gone.push(t); merged.push(o); absorbed = true; moved = true;
+      }
+      break;
+    }
+    if (absorbed) continue;
+    if (nr !== r || nc !== c) { grid[r][c] = null; grid[nr][nc] = t; t.r = nr; t.c = nc; moved = true; }
+  }
+  if (!moved) return;
+
+  history.push(snap); if (history.length > 200) history.shift();
+  score += gained;
+  for (const row of grid) for (const t of row) if (t) place(t.el, t.r, t.c);
+  for (const t of gone) { t.el.classList.add('gone'); place(t.el, t.r, t.c); }
+
+  const fn = () => {
+    gone.forEach(t => t.el.remove());
+    merged.forEach(t => { paint(t); animate(t.el, 'pop'); });
+    spawn();
+    over = !canMove();
+    updateStats(); save();
+  };
+  if (MOVE_MS === 0) fn(); else pending = { fn, timer: setTimeout(() => { pending = null; fn(); }, MOVE_MS) };
+}
+
+function undo(){
+  flush();
+  if (!history.length) return;
+  load(history.pop()); over = false; updateStats(); save();
+}
+
+// Keyboard
+addEventListener('keydown', e => {
+  const map = { ArrowUp:0, ArrowRight:1, ArrowDown:2, ArrowLeft:3, w:0, d:1, s:2, a:3, W:0, D:1, S:2, A:3,
+                'ц':0, 'в':1, 'ы':2, 'ф':3 };
+  if (e.key in map && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); move(map[e.key]); return; }
+  if (['u','U','z','Z','г','я'].includes(e.key) && !e.metaKey && !e.altKey) { e.preventDefault(); undo(); }
+});
+
+// Swipe
+let sx = 0, sy = 0, pid = null;
+board.addEventListener('pointerdown', e => { if (e.target.closest('button')) return; pid = e.pointerId; sx = e.clientX; sy = e.clientY; try { board.setPointerCapture(pid); } catch (_) {} });
+board.addEventListener('pointerup', e => {
+  if (e.pointerId !== pid) return; pid = null;
+  const dx = e.clientX - sx, dy = e.clientY - sy, ax = Math.abs(dx), ay = Math.abs(dy);
+  if (Math.max(ax, ay) < 22) return;
+  move(ax > ay ? (dx > 0 ? 1 : 3) : (dy > 0 ? 2 : 0));
+});
+board.addEventListener('pointercancel', () => { pid = null; });
+document.addEventListener('touchmove', e => { if (e.target.closest('#board')) e.preventDefault(); }, { passive: false });
+
+// Buttons
+let armTimer = null;
+function askNew(btn){
+  if (over || score === 0) { newGame(); return; }
+  if (btn.dataset.armed) { clearTimeout(armTimer); delete btn.dataset.armed; btn.textContent = 'Новая игра'; btn.classList.remove('warn'); newGame(); return; }
+  btn.dataset.armed = '1'; btn.textContent = 'Точно? Ещё раз'; btn.classList.add('warn');
+  armTimer = setTimeout(() => { delete btn.dataset.armed; btn.textContent = 'Новая игра'; btn.classList.remove('warn'); }, 3000);
+}
+$('newg').addEventListener('click', e => askNew(e.currentTarget));
+$('undo').addEventListener('click', undo);
+$('overUndo').addEventListener('click', undo);
+$('overNew').addEventListener('click', newGame);
+
+// Restore
+let saved = null;
+try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+if (saved && saved.cur && Array.isArray(saved.cur.cells) && saved.cur.cells.length === N) {
+  load(saved.cur); best = saved.best || 0; history = saved.history || []; over = !canMove(); updateStats();
+} else newGame();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script>
+</body>
+</html>
